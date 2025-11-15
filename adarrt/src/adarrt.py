@@ -1,12 +1,9 @@
 #!/usr/bin/env python
-
 import argparse
 import time
-
 import adapy
 import numpy as np
 import rospy
-
 
 class AdaRRT():
     """
@@ -44,7 +41,6 @@ class AdaRRT():
         def add_child(self, state):
             """
             Adds a new child at the given state.
-
             :param state: np.array of new child node's statee
             :returns: child Node object.
             """
@@ -90,49 +86,72 @@ class AdaRRT():
     def build(self):
         """
         Build an RRT.
-
         In each step of the RRT:
             1. Sample a random point.
             2. Find its nearest neighbor.
             3. Attempt to create a new node in the direction of sample from its
                 nearest neighbor.
             4. If we have created a new node, check for completion.
-
         Once the RRT is complete, add the goal node to the RRT and build a path
         from start to goal.
-
         :returns: A list of states that create a path from start to
             goal on success. On failure, returns None.
         """
         for k in range(self.max_iter):
-            # FILL in your code here
-
+            # 1. Sample a random point
+            sample = self._get_random_sample()
+            
+            # 2. Find its nearest neighbor
+            nearest_neighbor = self._get_nearest_neighbor(sample)
+            
+            # 3. Attempt to create a new node
+            new_node = self._extend_sample(sample, nearest_neighbor)
+            
+            # 4. Check for completion
             if new_node and self._check_for_completion(new_node):
-                # FILL in your code here
-
+                # Add goal node to the tree
+                self.goal.parent = new_node
+                new_node.children.append(self.goal)
+                
+                # Build path from start to goal
+                path = self._trace_path_from_start(self.goal)
+                
+                print("Found path after {0} iterations!".format(k))
                 return path
-
+        
         print("Failed to find path from {0} to {1} after {2} iterations!".format(
             self.start.state, self.goal.state, self.max_iter))
+        return None
 
     def _get_random_sample(self):
         """
         Uniformly samples the search space.
-
         :returns: A vector representing a randomly sampled point in the search
             space.
         """
-        # FILL in your code here
+        sample = np.random.uniform(
+            low=self.joint_lower_limits,
+            high=self.joint_upper_limits
+        )
+        return sample
 
     def _get_nearest_neighbor(self, sample):
         """
         Finds the closest node to the given sample in the search space,
         excluding the goal node.
-
         :param sample: The target point to find the closest neighbor to.
         :returns: A Node object for the closest neighbor.
         """
-        # FILL in your code here
+        min_dist = float('inf')
+        nearest_node = None
+        
+        for node in self.start:
+            dist = np.linalg.norm(node.state - sample)
+            if dist < min_dist:
+                min_dist = dist
+                nearest_node = node
+        
+        return nearest_node
 
     def _extend_sample(self, sample, neighbor):
         """
@@ -140,37 +159,59 @@ class AdaRRT():
         step_size away from neighbor. The new node is only created if it will
         not collide with any of the collision objects (see
         RRT._check_for_collision)
-
         :param sample: target point
         :param neighbor: closest existing node to sample
         :returns: The new Node object. On failure (collision), returns None.
         """
-        # FILL in your code here
+        direction = sample - neighbor.state
+        distance = np.linalg.norm(direction)
+        
+        if distance < 1e-6:
+            return None
+        
+        direction = direction / distance
+        new_state = neighbor.state + self.step_size * direction
+        new_state = np.clip(new_state, self.joint_lower_limits, self.joint_upper_limits)
+        
+        if self._check_for_collision(new_state):
+            return None
+        
+        new_node = neighbor.add_child(new_state)
+        return new_node
 
     def _check_for_completion(self, node):
         """
         Check whether node is within self.goal_precision distance of the goal.
-
         :param node: The target Node
         :returns: Boolean indicating node is close enough for completion.
         """
-        # FILL in your code here
+        distance = np.linalg.norm(node.state - self.goal.state)
+        return distance <= self.goal_precision
 
     def _trace_path_from_start(self, node=None):
         """
         Traces a path from start to node, if provided, or the goal otherwise.
-
         :param node: The target Node at the end of the path. Defaults to
             self.goal
         :returns: A list of states (not Nodes!) beginning at the start state and
             ending at the goal state.
         """
-        # FILL in your code here
+        if node is None:
+            node = self.goal
+        
+        path = []
+        current = node
+        
+        while current is not None:
+            path.append(current.state)
+            current = current.parent
+        
+        path.reverse()
+        return path
 
     def _check_for_collision(self, sample):
         """
         Checks if a sample point is in collision with any collision object.
-
         :returns: A boolean value indicating that sample is in collision.
         """
         if self.ada_collision_constraint is None:
@@ -200,7 +241,6 @@ def main(is_sim):
         raw_input("Please move arm to home position with the joystick. " +
             "Press ENTER to continue...")
 
-
     # launch viewer
     viewer = ada.start_viewer("dart_markers/simple_trajectories", "map")
 
@@ -209,6 +249,7 @@ def main(is_sim):
     sodaCanPose = [0.25, -0.35, 0.0, 0, 0, 0, 1]
     tableURDFUri = "package://pr_assets/data/furniture/uw_demo_table.urdf"
     tablePose = [0.3, 0.0, -0.7, 0.707107, 0, 0, 0.707107]
+
     world = ada.get_world()
     can = world.add_body_from_urdf(canURDFUri, sodaCanPose)
     table = world.add_body_from_urdf(tableURDFUri, tablePose)
@@ -238,6 +279,7 @@ def main(is_sim):
         ada.start_trajectory_executor()
 
     path = adaRRT.build()
+
     if path is not None:
         print("Path waypoints:")
         print(np.asarray(path))
@@ -253,6 +295,7 @@ def main(is_sim):
         raw_input('Press ENTER to execute trajectory and exit')
         ada.execute_trajectory(traj)
         rospy.sleep(1.0)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
